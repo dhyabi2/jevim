@@ -6,7 +6,7 @@ set -euo pipefail
 ADMIN="http://localhost:2019"
 DIAL="127.0.0.1:8410"
 ROUTES=$(curl -sf "$ADMIN/config/apps/http/servers/srv0/routes")
-SUB=$(echo "$ROUTES" | python3 -c '
+SUB=$(python3 -c '
 import json, sys
 for i, r in enumerate(json.load(sys.stdin)):
     hosts = (r.get("match") or [{}])[0].get("host") or []
@@ -14,14 +14,14 @@ for i, r in enumerate(json.load(sys.stdin)):
         for j, h in enumerate(r.get("handle") or []):
             if h.get("handler") == "subroute":
                 print(f"/config/apps/http/servers/srv0/routes/{i}/handle/{j}/routes"); sys.exit(0)
-sys.exit(1)')
+sys.exit(1)' <<<"$ROUTES")
 CURRENT=$(curl -sf "$ADMIN$SUB")
-if echo "$CURRENT" | grep -q "$DIAL"; then echo "route already present"; exit 0; fi
-POS=$(echo "$CURRENT" | python3 -c '
+if grep -q "$DIAL" <<<"$CURRENT"; then echo "route already present"; exit 0; fi
+POS=$(python3 -c '
 import json, sys
 routes = json.load(sys.stdin)
 first = routes[0] if routes else {}
-print(1 if any(h.get("handler") == "encode" for h in first.get("handle") or []) else 0)')
+print(1 if any(h.get("handler") == "encode" for h in first.get("handle") or []) else 0)' <<<"$CURRENT")
 ROUTE='{"match":[{"path":["/api/v1/browser-agent","/api/v1/browser-agent/*"]}],"handle":[{"handler":"reverse_proxy","flush_interval":-1,"upstreams":[{"dial":"'"$DIAL"'"}]}]}'
 curl -sf -X PUT -H "content-type: application/json" -d "$ROUTE" "$ADMIN$SUB/$POS" > /dev/null
 echo "route inserted at position $POS"

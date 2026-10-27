@@ -8,7 +8,7 @@ loopback. Chrome additionally fails every request to a private address (`JEVIM_B
     # on the server, from a copy of package.json, src/, server/, demo/ and deploy/Dockerfile in /opt/jevim-demo
     docker build -t jevim-demo:latest /opt/jevim-demo
     cp deploy/jevim-demo.service /etc/systemd/system/ && systemctl enable --now jevim-demo
-    cat deploy/Caddyfile.snippet >> /etc/caddy/Caddyfile && caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+    tee -a /etc/caddy/Caddyfile < deploy/Caddyfile.snippet && caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
 
 `/etc/jevim-demo.env` (mode 600) holds `NANO_API_KEY`, `JEVIM_OWNER_KEYS` (comma-separated keys with no
 run limit, sent as `Authorization: Bearer <key>`), `JEVIM_CONCURRENCY` and `JEVIM_FREE_RUNS`.
