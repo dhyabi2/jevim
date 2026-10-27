@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jevim Browser Agent</title>
+<meta name="description" content="Tell it what you want done on a website, and watch it do it. 10 free runs, no sign-up.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f46e5'/><path d='M9 16h14M17 10l6 6-6 6' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap row">
+    <div class="brand"><span class="logo" aria-hidden="true">&rarr;</span> Jevim</div>
+    <nav><a href="#try">Try it</a><a href="#api">API</a><a href="#numbers">Numbers</a></nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <h1>Tell it what to do on a website.<br>Watch it do it.</h1>
+    <p class="lead">An AI agent that uses a real browser like a person would: it searches, clicks, fills in
+      filters and reads the page, then tells you what it found. Your first 10 runs are free, with no sign-up.</p>
+  </section>
+
+  <section id="try" class="wrap card">
+    <form id="form" autocomplete="off">
+      <label for="website">Website</label>
+      <input id="website" name="website" placeholder="allrecipes.com" required>
+      <label for="task">What should it do there?</label>
+      <textarea id="task" name="task" rows="3" placeholder="Find a vegetarian lasagna recipe with at least 4.5 stars and tell me its cooking time." required></textarea>
+      <div class="examples" aria-label="Examples">
+        <span>Try:</span>
+        <button type="button" data-site="allrecipes.com" data-task="Find a vegetarian lasagna recipe rated at least 4.5 stars and tell me its total cooking time.">A recipe</button>
+        <button type="button" data-site="arxiv.org" data-task="Find the most recent paper about web agents and give me its title and authors.">A research paper</button>
+        <button type="button" data-site="bbc.com/weather" data-task="What is the weather forecast for London tomorrow?">The weather</button>
+        <button type="button" data-site="github.com" data-task="Find the browser-use repository and tell me how many stars it has.">A GitHub repo</button>
+      </div>
+      <div class="actions">
+        <button id="go" type="submit">Run it</button>
+        <span id="quota" class="muted"></span>
+      </div>
+      <p id="error" class="error" role="alert" hidden></p>
+    </form>
+  </section>
+
+  <section id="live" class="wrap" hidden>
+    <div class="live-grid">
+      <div class="card screen">
+        <div class="screen-head"><span id="status" class="pill">Queued</span><span id="clock" class="muted"></span></div>
+        <div class="viewport"><img id="frame" alt="What the agent sees" hidden><p id="waiting" class="muted">The browser is starting&hellip;</p></div>
+      </div>
+      <div class="card steps">
+        <h2>What it's doing</h2>
+        <ol id="steps"></ol>
+      </div>
+    </div>
+    <div id="result" class="card result" hidden>
+      <h2>Answer</h2>
+      <div id="answer"></div>
+      <p id="meta" class="muted"></p>
+    </div>
+  </section>
+
+  <section id="numbers" class="wrap">
+    <h2>How it compares</h2>
+    <p>We ran it against <a href="https://github.com/browser-use/browser-use">browser-use</a>, the most popular open-source
+      browser agent, on 445 real tasks the agent had never seen (Online-Mind2Web and WebVoyager), with the same AI model and the
+      same independent judge. Honest summary:</p>
+    <div class="stats">
+      <div class="stat"><b>~3&times;</b><span>fewer AI tokens per task, so it costs about a third as much to run</span></div>
+      <div class="stat"><b>Faster</b><span>median task time lower on every benchmark run</span></div>
+      <div class="stat"><b>Stays on the site</b><span>answers from the website you named, instead of wandering to others</span></div>
+      <div class="stat"><b>Even</b><span>on how many tasks it gets right, by the strict judge (36% vs 32%, not a significant difference)</span></div>
+    </div>
+    <p class="muted">It also refuses to click a button that changed while it was deciding, and a finished task can be replayed
+      later with no AI calls at all.</p>
+  </section>
+
+  <section id="api" class="wrap">
+    <h2>Use it from code</h2>
+    <p>Everything the page does is a plain HTTP API. Each person gets 10 free runs.</p>
+    <h3>Start a run</h3>
+    <pre><code id="curl-start">curl -X POST https://agent.172.86.85.83.sslip.io/api/v1/runs \
+  -H 'content-type: application/json' \
+  -d '{"website": "arxiv.org", "task": "Find the newest paper about web agents and give its title"}'</code></pre>
+    <p>Answer: <code>202 {"id": "&hellip;", "status": "queued", "links": {"self": "&hellip;", "events": "&hellip;"}}</code></p>
+    <h3>Get the result</h3>
+    <pre><code>curl https://agent.172.86.85.83.sslip.io/api/v1/runs/RUN_ID</code></pre>
+    <p>When <code>status</code> is <code>done</code>, <code>answer</code> holds the result and <code>steps</code> every action taken.
+      <code>replay_script</code> is the run as a script that repeats it with no AI calls, and <code>cost</code> is what the
+      AI calls were billed: <code>{"usd": 0.0041, "xno": 0.0114, "rate": {"usd_per_xno": 0.359, "source": "coingecko", "at": "&hellip;"}}</code>,
+      with the XNO rate refreshed every hour.</p>
+    <h3>Watch it live</h3>
+    <pre><code>curl -N https://agent.172.86.85.83.sslip.io/api/v1/runs/RUN_ID/events</code></pre>
+    <p>Server-sent events: <code>status</code>, <code>step</code>, <code>frame</code> (the live browser screen, a JPEG, several times a second) and <code>done</code>.</p>
+    <h3>Other endpoints</h3>
+    <ul>
+      <li><code>GET /api/v1/quota</code> &rarr; <code>{"free_runs_left": 10}</code></li>
+      <li><code>GET /health</code> &rarr; <code>{"ok": true, "running": 0, "queued": 0}</code></li>
+    </ul>
+  </section>
+</main>
+
+<footer class="wrap muted">
+  <p>Runs use a real browser on our server. Please don't ask it to log in to your accounts or enter personal details.
+    Websites and tasks are processed to run the agent and kept for up to a day.</p>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

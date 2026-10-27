@@ -1,0 +1,21 @@
+{
+  "name": "jevim",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "A modal keyboard layer for the web: vim grammar over a page element index.",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "test": "node --test \"test/**/*.test.js\"",
+    "check": "npm run build && npm test",
+    "serve": "node server/serve.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "jsdom": "^25.0.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dhyabi2/jevim.git"
+  }
+}

@@ -1,0 +1,115 @@
+/* Dark, monospace, and colour-coded by industry: the palette is the only navigation aid on a page
+   that is otherwise one long list, so each industry keeps the same hue everywhere it appears. */
+:root {
+  --bg: #0d0f14;
+  --panel: #151922;
+  --panel-2: #1b2029;
+  --line: #262d3a;
+  --ink: #e8ecf4;
+  --ink-dim: #9aa5b8;
+  --ink-faint: #6b7688;
+  --accent: #ffd166;
+  --gutter: 16px;
+  --radius: 14px;
+}
+:root:not([data-theme="light"]) { color-scheme: dark; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f7f8fb; --panel: #ffffff; --panel-2: #f0f2f7; --line: #dfe3ec;
+    --ink: #161a22; --ink-dim: #55607a; --ink-faint: #8b95a8; --accent: #b07c00;
+    color-scheme: light;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 15px/1.6 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 var(--gutter); }
+
+.top { border-bottom: 1px solid var(--line); padding: 34px 0 22px; background:
+  radial-gradient(1200px 340px at 12% -40%, rgba(255,209,102,.13), transparent 70%),
+  radial-gradient(900px 300px at 88% -50%, rgba(120,190,255,.12), transparent 70%); }
+h1 { margin: 0; font-size: clamp(30px, 7vw, 46px); font-weight: 700; letter-spacing: -.02em; }
+.dot { color: var(--accent); }
+.tag { margin: 10px 0 0; color: var(--ink-dim); max-width: 62ch; font-size: 15px; }
+
+.how { display: flex; flex-wrap: wrap; gap: 8px 10px; margin: 20px 0 0; align-items: center; }
+.how-step { background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+  padding: 6px 13px; font-size: 12.5px; color: var(--ink-dim); }
+.how-step b { color: var(--accent); margin-right: 5px; }
+.how-arrow { color: var(--ink-faint); }
+@media (max-width: 700px) { .how-arrow { display: none; } }
+
+.stats { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 18px 0 0;
+  font-size: 12.5px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .07em; }
+.stats b { color: var(--ink); }
+.stat.newest { color: var(--accent); }
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 20px; padding-bottom: 4px; }
+.chip { background: var(--panel); color: var(--ink-dim); border: 1px solid var(--line);
+  border-radius: 999px; padding: 7px 14px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.chip:hover { color: var(--ink); border-color: var(--ink-faint); }
+.chip[aria-pressed="true"] { color: #0d0f14; font-weight: 700; }
+.chip .n { opacity: .6; margin-left: 6px; }
+
+main { padding: 18px 0 40px; display: grid; gap: 14px; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--hue);
+  border-radius: var(--radius); padding: 18px 18px 16px; }
+.card-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.num { color: var(--ink-faint); font-size: 12px; }
+.name { font-size: 19px; font-weight: 700; margin: 0; }
+.badges { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line);
+  color: var(--ink-dim); white-space: nowrap; }
+.badge.field { background: color-mix(in srgb, var(--hue) 20%, transparent);
+  border-color: color-mix(in srgb, var(--hue) 45%, transparent); color: var(--ink); }
+.badge.hand { border-color: #3d6b4a; color: #8fd3a4; }
+.badge.machine { border-color: #5a5230; color: #d9c07a; }
+
+.plain { font-size: 16px; margin: 12px 0 0; }
+.helps { margin: 10px 0 0; font-size: 13px; color: var(--ink-dim); }
+.helps b { color: var(--ink); font-weight: 500; }
+
+details { margin: 14px 0 0; border-top: 1px dashed var(--line); padding-top: 12px; }
+summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+summary::marker { color: var(--ink-faint); }
+dl { display: grid; grid-template-columns: minmax(130px, 170px) 1fr; gap: 8px 16px; margin: 14px 0 0;
+  font-size: 13.5px; }
+dt { color: var(--ink-faint); text-transform: uppercase; font-size: 11px; letter-spacing: .06em;
+  padding-top: 3px; }
+dd { margin: 0; color: var(--ink-dim); }
+dd b { color: var(--ink); font-weight: 500; }
+@media (max-width: 640px) { dl { grid-template-columns: 1fr; gap: 3px 0; } dt { padding-top: 9px; } }
+
+.foot { border-top: 1px solid var(--line); padding-top: 20px; padding-bottom: 46px;
+  color: var(--ink-faint); font-size: 12.5px; }
+.foot b { color: var(--ink-dim); }
+.foot .warn { color: #d99a8f; }
+.empty { color: var(--ink-faint); padding: 30px 0; }
+
+/* Sort control and the need meter. The meter is the primary ranking signal now, so it sits above the
+   description rather than buried in the detail panel. */
+.sorts { display: flex; gap: 8px; padding-top: 18px; }
+.sort-btn { background: var(--panel); color: var(--ink-dim); border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+.sort-btn:hover { color: var(--ink); }
+.sort-btn[aria-pressed="true"] { background: var(--panel-2); color: var(--ink); border-color: var(--ink-faint); font-weight: 700; }
+
+.need { display: flex; align-items: center; gap: 11px; margin: 13px 0 0; }
+.meter { flex: 0 0 132px; height: 7px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+.meter span { display: block; height: 100%; border-radius: 999px; background: var(--need, var(--accent)); }
+.need-label { font-size: 12px; color: var(--ink-dim); }
+.need-label b { color: var(--ink); }
+.tone-hot { --need: #ff8a6b; }
+.tone-high { --need: #ffd166; }
+.tone-mid { --need: #9ae6b4; }
+.tone-low { --need: #7ec4ff; }
+.tone-niche { --need: #6b7688; }
+.tone-none { --need: var(--line); }
+.demand { color: var(--ink-dim); font-style: italic; }
+@media (max-width: 520px) { .meter { flex-basis: 92px; } }

@@ -1,0 +1,15 @@
+[Unit]
+Description=Vend gateway for the Jevim browser agent (private; beside vend-api)
+After=network-online.target vend-api.service
+
+[Service]
+WorkingDirectory=/root/vend-private
+EnvironmentFile=/root/.hermes/.env
+EnvironmentFile=/root/vend/deploy/vend.env
+EnvironmentFile=/root/vend-private/browser-agent.env
+ExecStart=/root/vend/.venv/bin/python /root/vend-private/browser_agent.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

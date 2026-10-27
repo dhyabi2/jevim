@@ -1,0 +1,13 @@
+*.log
+*.pyc
+.data/
+.env
+.env.*
+.ledger/.lock
+.ledger/cache.json
+.ledger/invent2/cursor.lock
+__pycache__/
+bench/data/
+bench/out/
+node_modules/
+web/.vercel/

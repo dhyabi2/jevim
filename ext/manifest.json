@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Jevim",
+  "version": "0.1.0",
+  "description": "A modal keyboard layer for the web. Blocks 1-2: element index and grammar core, no model calls.",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["jevim.js"],
+      "css": ["jevim.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+.jevim-hints { position: absolute; inset: 0; pointer-events: none; z-index: 2147483646; }
+
+.jevim-hint {
+  position: absolute;
+  font: 600 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #ffd86b;
+  color: #23200f;
+  border: 1px solid #b9962c;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  text-transform: uppercase;
+}
+
+.jevim-status {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  z-index: 2147483647;
+  font: 500 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 2px 10px;
+  background: #16181d;
+  color: #e6e8ee;
+  border-top-right-radius: 4px;
+  transition: opacity 180ms ease;
+  pointer-events: none;
+}

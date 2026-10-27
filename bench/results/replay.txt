@@ -1,0 +1,10 @@
+
+ours: 18 usable recordings
+  replay "later": 18 replays · same final page 8/18 · actions that failed or could not be found 34 · crashed 8 · LLM calls 0 (0 tokens, recording used 834718) · seconds p50 35.7
+  replay "later2": 18 replays · same final page 15/18 · actions that failed or could not be found 25 · crashed 0 · LLM calls 0 (0 tokens, recording used 834718) · seconds p50 84.2
+  replay "now": 18 replays · same final page 14/18 · actions that failed or could not be found 34 · crashed 0 · LLM calls 0 (0 tokens, recording used 834718) · seconds p50 54.4
+
+browser-use: 20 usable recordings
+  replay "later": 20 replays · same final page 12/20 · actions that failed or could not be found 69 · crashed 0 · LLM calls 23 (37783 tokens, recording used 3267263) · seconds p50 192.1
+  replay "later2": 20 replays · same final page 14/20 · actions that failed or could not be found 42 · crashed 0 · LLM calls 23 (30843 tokens, recording used 3267263) · seconds p50 145.4
+  replay "now": 20 replays · same final page 15/20 · actions that failed or could not be found 47 · crashed 0 · LLM calls 23 (29872 tokens, recording used 3267263) · seconds p50 125.1

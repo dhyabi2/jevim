@@ -1,0 +1,19 @@
+[Unit]
+Description=Jevim browser agent - public API and demo (docker)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=5
+ExecStartPre=-/usr/bin/docker rm -f jevim-demo
+ExecStart=/usr/bin/docker run --rm --name jevim-demo \
+  --env-file /etc/jevim-demo.env \
+  -p 127.0.0.1:8790:8790 \
+  -v jevim-demo-data:/data \
+  --shm-size=1g --memory=3g --cpus=1.8 --pids-limit=2000 \
+  jevim-demo:latest
+ExecStop=/usr/bin/docker stop jevim-demo
+
+[Install]
+WantedBy=multi-user.target

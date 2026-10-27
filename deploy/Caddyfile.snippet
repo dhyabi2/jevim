@@ -1,0 +1,6 @@
+agent.172.86.85.83.sslip.io {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8790 {
+        flush_interval -1
+    }
+}

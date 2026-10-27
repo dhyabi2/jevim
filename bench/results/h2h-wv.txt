@@ -1,0 +1,46 @@
+bench/out/h2h-wv: 60 tasks
+
+ours (text + screenshot)
+  strict   30/60    50%    lenient  21/60    35%
+  on the task's site only: strict  28/60  46.7%    lenient  20/60  33.3%    (left the site in 3 runs)
+    Allrecipes strict   3/4    75%  lenient   2/4    50%
+    Amazon strict   3/4    75%  lenient   3/4    75%
+    Apple  strict   1/4    25%  lenient   2/4    50%
+    ArXiv  strict   3/4    75%  lenient   2/4    50%
+    BBC News strict   0/4     0%  lenient   1/4    25%
+    Booking strict   1/4    25%  lenient   2/4    50%
+    Cambridge Dictionary strict   2/4    50%  lenient   2/4    50%
+    Coursera strict   3/4    75%  lenient   0/4     0%
+    ESPN   strict   2/4    50%  lenient   1/4    25%
+    GitHub strict   3/4    75%  lenient   1/4    25%
+    Google Flights strict   0/4     0%  lenient   0/4     0%
+    Google Map strict   1/4    25%  lenient   1/4    25%
+    Google Search strict   4/4   100%  lenient   0/4     0%
+    Huggingface strict   3/4    75%  lenient   2/4    50%
+    Wolfram Alpha strict   1/4    25%  lenient   2/4    50%
+  seconds p50 200.7 p95 793 · steps p50 16 · tokens/task p50 46227 mean 59903
+  errors 1 · unjudged 1
+
+browser-use
+  strict   22/60  36.7%    lenient  24/60    40%
+  on the task's site only: strict  16/60  26.7%    lenient  15/60    25%    (left the site in 28 runs)
+    Allrecipes strict   1/4    25%  lenient   2/4    50%
+    Amazon strict   2/4    50%  lenient   4/4   100%
+    Apple  strict   1/4    25%  lenient   2/4    50%
+    ArXiv  strict   1/4    25%  lenient   3/4    75%
+    BBC News strict   0/4     0%  lenient   0/4     0%
+    Booking strict   0/4     0%  lenient   2/4    50%
+    Cambridge Dictionary strict   2/4    50%  lenient   0/4     0%
+    Coursera strict   2/4    50%  lenient   1/4    25%
+    ESPN   strict   3/4    75%  lenient   2/4    50%
+    GitHub strict   3/4    75%  lenient   0/4     0%
+    Google Flights strict   1/4    25%  lenient   1/4    25%
+    Google Map strict   2/4    50%  lenient   1/4    25%
+    Google Search strict   1/4    25%  lenient   1/4    25%
+    Huggingface strict   2/4    50%  lenient   2/4    50%
+    Wolfram Alpha strict   1/4    25%  lenient   3/4    75%
+  seconds p50 245.4 p95 630.5 · steps p50 17 · tokens/task p50 144880 mean 145248
+  errors 0 · unjudged 1
+
+paired strict (with screenshots): both 15, only ours 15, only browser-use 7, neither 23 (sign test p=0.134)
+paired lenient (with screenshots): both 13, only ours 8, only browser-use 11, neither 28 (sign test p=0.648)

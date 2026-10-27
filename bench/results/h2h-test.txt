@@ -1,0 +1,33 @@
+bench/out/h2h-test: 60 tasks
+
+ours (text)
+  strict   18/60    30%    lenient  20/60  33.3%
+  on the task's site only: strict  15/60    25%    lenient  16/60  26.7%    (left the site in 10 runs)
+    easy   strict  12/20    60%  lenient  12/20    60%
+    medium strict   3/20    15%  lenient   3/20    15%
+    hard   strict   3/20    15%  lenient   5/20    25%
+  seconds p50 96.4 p95 900.1 · steps p50 15 · tokens/task p50 42147 mean 47764
+  errors 3 · unjudged 0
+
+ours (text + screenshot)
+  strict   19/60  31.7%    lenient  21/60    35%
+  on the task's site only: strict  17/60  28.3%    lenient  19/60  31.7%    (left the site in 9 runs)
+    easy   strict  12/20    60%  lenient  12/20    60%
+    medium strict   4/20    20%  lenient   4/20    20%
+    hard   strict   3/20    15%  lenient   5/20    25%
+  seconds p50 108.2 p95 249.1 · steps p50 13 · tokens/task p50 42367 mean 48996
+  errors 1 · unjudged 0
+
+browser-use
+  strict   14/60  23.3%    lenient  25/60  41.7%
+  on the task's site only: strict  13/60  21.7%    lenient  11/60  18.3%    (left the site in 34 runs)
+    easy   strict   7/20    35%  lenient  11/20    55%
+    medium strict   4/20    20%  lenient   9/20    45%
+    hard   strict   3/20    15%  lenient   5/20    25%
+  seconds p50 164.1 p95 340.7 · steps p50 23 · tokens/task p50 201055 mean 208568
+  errors 0 · unjudged 0
+
+paired strict: both 8, only ours 10, only browser-use 6, neither 36 (sign test p=0.454)
+paired lenient: both 10, only ours 10, only browser-use 15, neither 25 (sign test p=0.424)
+paired strict (with screenshots): both 9, only ours 10, only browser-use 5, neither 36 (sign test p=0.302)
+paired lenient (with screenshots): both 14, only ours 7, only browser-use 11, neither 28 (sign test p=0.481)
