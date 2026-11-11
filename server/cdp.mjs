@@ -21,7 +21,11 @@ const CHROME = process.env.CHROME_PATH
   || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 /** The user agent this Chrome would send if it were not headless, from its own version number. */
+let cachedUserAgent = null;
 function userAgent() {
+  // Asked once per process: `chrome --version` starts a Chrome to print a line, and a server that
+  // launches a browser per run was paying for that every time.
+  if (cachedUserAgent) return cachedUserAgent;
   let major = '140';
   try {
     const out = execFileSync(CHROME, ['--version'], { encoding: 'utf8', timeout: 10000 });
@@ -29,7 +33,8 @@ function userAgent() {
   } catch { /* keep the default */ }
   const platform = process.platform === 'darwin' ? 'Macintosh; Intel Mac OS X 10_15_7'
     : process.platform === 'win32' ? 'Windows NT 10.0; Win64; x64' : 'X11; Linux x86_64';
-  return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+  cachedUserAgent = `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+  return cachedUserAgent;
 }
 
 // Requests a public deployment must never make on a visitor's behalf: this machine, its private network,
@@ -94,8 +99,13 @@ export async function launch({ port = 0, headless = true, timeoutMs = 20000, ste
     '--no-first-run', '--no-default-browser-check', '--disable-extensions',
     '--disable-background-networking', '--disable-sync', '--mute-audio',
     '--window-size=1280,900',
+    // Chrome otherwise starts its bundled extensions' background pages, which no run uses.
+    '--disable-component-extensions-with-background-pages', '--disable-default-apps',
     // Deployment-specific switches, e.g. inside a container: JEVIM_CHROME_ARGS="--no-sandbox --disable-dev-shm-usage".
     ...(process.env.JEVIM_CHROME_ARGS || '').split(/\s+/).filter(Boolean),
+    // The startup tab. Left to itself Chrome opens its New Tab page there, which loads a Google iframe
+    // over the network while the run's own first page is trying to load.
+    'about:blank',
   ].filter(Boolean);
 
   const child = spawn(CHROME, args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -210,33 +220,199 @@ export async function connect(endpoint) {
   return { send, on, close: () => socket.close() };
 }
 
+// ---- knowing when a page has stopped moving -----------------------------------------------------------
+//
+// The first version waited a fixed 400 ms after every action and then polled document.body.innerHTML.length
+// every 250 ms until it read the same twice. That cost about a second per action when nothing was
+// happening, serialised the whole DOM four times a second on a large page, and still missed any change
+// that kept the length the same. What follows asks the page and the network directly instead:
+//
+//   mutations   a MutationObserver armed BEFORE the action, so what the action did synchronously counts
+//   network     requests in flight for this tab, from CDP's own events
+//   navigation  the main frame committing a new document, which invalidates the observer
+//
+// An action is settled when the document is complete, nothing has mutated for `quietMs`, and no request
+// is in flight. An action that produced no sign of life at all is watched for `idleMs` before it is
+// believed, because a bare timer gives no other warning that something is about to render.
+
+export const SETTLE = {
+  quietMs: Number(process.env.JEVIM_SETTLE_QUIET_MS || 120),
+  idleMs: Number(process.env.JEVIM_SETTLE_IDLE_MS || 400),
+  ceilingMs: Number(process.env.JEVIM_SETTLE_CEILING_MS || 8000),
+};
+// A fresh document gets a longer quiet window: frameworks hydrate in bursts with gaps between them.
+export const SETTLE_NAV = { quietMs: 250, idleMs: 250 };
+
+// Requests that never finish, or whose finishing changes nothing the agent can see.
+const BACKGROUND_TYPES = new Set(['WebSocket', 'EventSource', 'Media', 'Ping', 'Preflight', 'CSPViolationReport', 'Prefetch']);
+// A request still open after this long is a long-poll or a stream, not something to wait out.
+const REQUEST_STALE_MS = 4000;
+
+// Lives in the page only as an object this side holds a handle to: no global, nothing a page can detect.
+// `style` attribute changes are ignored - an animation writes them every frame and never goes quiet.
+const WATCHER = `(() => {
+  const s = { n: 0, last: 0 };
+  const mo = new MutationObserver((records) => {
+    for (const r of records) {
+      if (r.type === 'attributes' && r.attributeName === 'style') continue;
+      s.n += 1; s.last = performance.now();
+    }
+  });
+  mo.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+  // Typing, ticking a box and choosing an option change a property, not the tree, so no mutation is
+  // recorded for them. Their events are the sign that the action landed.
+  const note = () => { s.n += 1; s.last = performance.now(); };
+  for (const type of ['input', 'change', 'submit']) document.addEventListener(type, note, true);
+  s.wait = (quiet, idle, ceiling) => new Promise((resolve) => {
+    const t0 = performance.now();
+    const tick = () => {
+      const now = performance.now();
+      const ready = document.readyState === 'complete';
+      const calm = s.n === 0 ? now - t0 >= idle : now - s.last >= quiet;
+      if ((ready && calm) || now - t0 >= ceiling) { resolve({ n: s.n, ready }); return; }
+      setTimeout(tick, 16);
+    };
+    tick();
+  });
+  s.stop = () => { mo.disconnect(); for (const type of ['input', 'change', 'submit']) document.removeEventListener(type, note, true); };
+  return s;
+})()`;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 /**
- * Open a page and wait for it to be quiet.
+ * A handle on one attached tab: commands, evaluation, and the settling described above.
  *
- * Quiescence here is the same idea as in the extension: the load event is not enough, because a page
- * that renders after its own fetches is still moving when `load` fires.
+ * Everything it listens to is filtered to this tab's session and removed on close. The first version
+ * counted every tab's requests in one number and never removed a listener, so in a Chrome shared between
+ * runs one visitor's traffic kept another visitor's page from ever looking quiet.
  */
-export async function open(cdp, url, { quietMs = 500, ceilingMs = 15000, browserContextId = undefined } = {}) {
+export function attach(cdp, targetId, sessionId) {
+  const call = (method, params, timeoutMs) => cdp.send(method, params, sessionId, timeoutMs);
+  const inflight = new Map();
+  let navigations = 0;
+  let onNavigate = [];
+  const offs = [
+    cdp.on('Network.requestWillBeSent', (p, sid) => {
+      if (sid !== sessionId || BACKGROUND_TYPES.has(p.type)) return;
+      inflight.set(p.requestId, Date.now());
+    }),
+    cdp.on('Network.loadingFinished', (p, sid) => { if (sid === sessionId) inflight.delete(p.requestId); }),
+    cdp.on('Network.loadingFailed', (p, sid) => { if (sid === sessionId) inflight.delete(p.requestId); }),
+    cdp.on('Page.frameNavigated', (p, sid) => {
+      if (sid !== sessionId || p.frame.parentId) return;
+      navigations += 1;
+      inflight.clear();              // the old document's requests died with it
+      const waiting = onNavigate; onNavigate = [];
+      for (const wake of waiting) wake();
+    }),
+  ];
+  const busy = () => {
+    const now = Date.now();
+    for (const [id, at] of inflight) if (now - at > REQUEST_STALE_MS) inflight.delete(id);
+    return inflight.size > 0;
+  };
+
+  async function arm() {
+    const out = await call('Runtime.evaluate', { expression: WATCHER, returnByValue: false }, 5000);
+    if (out.exceptionDetails || !out.result.objectId) throw new Error('watcher did not start');
+    return { objectId: out.result.objectId, navigations };
+  }
+  const disarm = (watcher) => {
+    if (!watcher) return;
+    call('Runtime.callFunctionOn', { objectId: watcher.objectId, functionDeclaration: 'function(){ this.stop(); }' }, 5000)
+      .then(() => call('Runtime.releaseObject', { objectId: watcher.objectId }, 5000)).catch(() => null);
+  };
+
+  /** Wait until the page has stopped moving. `armed` is a watcher started before the action, if any. */
+  async function settled({ quietMs = SETTLE.quietMs, idleMs = SETTLE.idleMs, ceilingMs = SETTLE.ceilingMs } = {}, armed = null) {
+    const end = Date.now() + ceilingMs;
+    let watcher = armed;
+    let idle = idleMs;
+    let quiet = quietMs;
+    try {
+      for (;;) {
+        const left = end - Date.now();
+        if (left <= 0) return { settled: false };
+        // The document the watcher was armed in is gone: whatever it saw no longer describes the page.
+        if (watcher && watcher.navigations !== navigations) { watcher = null; }
+        if (!watcher) {
+          quiet = Math.max(quiet, SETTLE_NAV.quietMs);
+          idle = quiet;
+          try { watcher = await arm(); } catch { await sleep(30); continue; }
+        }
+        let navigated = false;
+        const nav = new Promise((resolve) => { onNavigate.push(() => { navigated = true; resolve(null); }); });
+        const waited = call('Runtime.callFunctionOn', {
+          objectId: watcher.objectId, returnByValue: true, awaitPromise: true,
+          functionDeclaration: `function(){ return this.wait(${quiet}, ${idle}, ${left}); }`,
+        }, left + 2000).then((out) => (out.exceptionDetails ? null : out.result.value), () => null);
+        const seen = await Promise.race([waited, nav, sleep(left + 100).then(() => 'late')]);
+        if (seen === 'late') return { settled: false };
+        if (navigated || seen === null) { watcher = null; await sleep(10); continue; }
+        if (busy()) {
+          // A response is on its way and the page will render it: wait for it, then for the render.
+          while (busy() && Date.now() < end && watcher.navigations === navigations) await sleep(15);
+          idle = quiet;
+          continue;
+        }
+        return { settled: true, mutations: seen.n };
+      }
+    } finally { disarm(watcher); }
+  }
+
+  return {
+    targetId,
+    sessionId,
+    call,
+    /** Evaluate in the page and return a JSON-serialisable result. */
+    async evaluate(expression) {
+      const out = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+      if (out.exceptionDetails) throw new Error(out.exceptionDetails.text || 'evaluate failed');
+      return out.result.value;
+    },
+    /**
+     * Start watching before an action; `settled()` on what comes back waits for the action's effects.
+     * Never throws: on a page that cannot be watched right now, the wait arms itself afterwards.
+     */
+    async watch() {
+      const watcher = await arm().catch(() => null);
+      return { settled: (options) => settled(options, watcher) };
+    },
+    settled,
+    busy,
+    async close() {
+      for (const off of offs) off();
+      await cdp.send('Target.closeTarget', { targetId });
+    },
+    detach() { for (const off of offs) off(); },
+  };
+}
+
+/** Attach to a tab and switch on the domains every session uses. */
+export async function attachTarget(cdp, targetId) {
+  const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
+  const page = attach(cdp, targetId, sessionId);
+  // One wave, not five round trips: CDP runs a session's commands in the order they arrive.
+  await Promise.all([
+    page.call('Page.enable'), page.call('Runtime.enable'), page.call('Network.enable'),
+    page.call('DOM.enable'), page.call('Accessibility.enable'),
+  ]);
+  await blockPrivateAddresses(page.call, cdp, sessionId);
+  return page;
+}
+
+/**
+ * Open a page and wait for it to settle.
+ *
+ * The load event is not enough, because a page that renders after its own fetches is still moving when
+ * `load` fires; see `settled` for what "settled" means.
+ */
+export async function open(cdp, url, { ceilingMs = 15000, browserContextId = undefined } = {}) {
   // With a browserContextId the tab lives in its own context - separate cookies, storage and cache -
   // inside a Chrome other sessions share.
   const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank', ...(browserContextId ? { browserContextId } : {}) });
-  const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
-  const call = (method, params) => cdp.send(method, params, sessionId);
-
-  await call('Page.enable');
-  await call('Runtime.enable');
-  await call('Network.enable');
-  await blockPrivateAddresses(call, cdp, sessionId);
-  await call('DOM.enable');
-  await call('Accessibility.enable');
-
-  let inflight = 0;
-  let lastEvent = Date.now();
-  const touch = () => { lastEvent = Date.now(); };
-  cdp.on('Network.requestWillBeSent', () => { inflight++; touch(); });
-  const settle = () => { inflight = Math.max(0, inflight - 1); touch(); };
-  cdp.on('Network.loadingFinished', settle);
-  cdp.on('Network.loadingFailed', settle);
+  const page = await attachTarget(cdp, targetId);
 
   // A target created while another tab is foreground is a BACKGROUND tab, and Chrome throttles
   // background navigation hard enough that Page.navigate simply does not return - it hung for the full
@@ -249,30 +425,13 @@ export async function open(cdp, url, { quietMs = 500, ceilingMs = 15000, browser
   // retry after stopping whatever stalled.
   for (let attempt = 1; ; attempt++) {
     try {
-      await cdp.send('Page.navigate', { url }, sessionId, 60000);
+      await page.call('Page.navigate', { url }, 60000);
       break;
     } catch (error) {
       if (attempt >= 2 || !/timed out/.test(error.message)) throw error;
-      await call('Page.stopLoading').catch(() => null);
+      await page.call('Page.stopLoading').catch(() => null);
     }
   }
-
-  const startedAt = Date.now();
-  for (;;) {
-    if (inflight === 0 && Date.now() - lastEvent >= quietMs) break;
-    if (Date.now() - startedAt >= ceilingMs) break;
-    await new Promise((r) => setTimeout(r, 60));
-  }
-
-  return {
-    sessionId,
-    call,
-    /** Evaluate in the page and return a JSON-serialisable result. */
-    async evaluate(expression) {
-      const out = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-      if (out.exceptionDetails) throw new Error(out.exceptionDetails.text || 'evaluate failed');
-      return out.result.value;
-    },
-    async close() { await cdp.send('Target.closeTarget', { targetId }); },
-  };
+  if (url !== 'about:blank') await page.settled({ ...SETTLE_NAV, ceilingMs });
+  return page;
 }

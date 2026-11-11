@@ -1,0 +1,24 @@
+{
+ "runs": 3,
+ "actions": 12,
+ "launch_ms": 375,
+ "live_cold_ms": 13351,
+ "replay_cold_ms": 13328,
+ "live_warm_ms": 12585,
+ "replay_warm_ms": 12251,
+ "per_action_warm_replay_ms": 1021,
+ "failures": [
+  "live run 0: answer \"FAILED MISSING link \\\"Continue to checkout form\\\"\" step 11: MISSING link \"Continue to checkout form\"",
+  "replay run 0: {\"actions\":12,\"executed\":11,\"unresolved\":0,\"failed\":0} at http://127.0.0.1:53468/spa",
+  "warm live run 0: answer \"FAILED MISSING link \\\"Continue to checkout form\\\"\" step 11: MISSING link \"Continue to checkout form\"",
+  "warm replay run 0: {\"actions\":12,\"executed\":11,\"unresolved\":0,\"failed\":0} at http://127.0.0.1:53468/spa",
+  "live run 1: answer \"FAILED MISSING link \\\"Continue to checkout form\\\"\" step 11: MISSING link \"Continue to checkout form\"",
+  "replay run 1: {\"actions\":12,\"executed\":11,\"unresolved\":0,\"failed\":0} at http://127.0.0.1:53468/spa",
+  "warm live run 1: answer \"FAILED MISSING link \\\"Continue to checkout form\\\"\" step 11: MISSING link \"Continue to checkout form\"",
+  "warm replay run 1: {\"actions\":12,\"executed\":11,\"unresolved\":0,\"failed\":0} at http://127.0.0.1:53468/spa",
+  "live run 2: answer \"FAILED MISSING link \\\"Continue to checkout form\\\"\" step 11: MISSING link \"Continue to checkout form\"",
+  "replay run 2: {\"actions\":12,\"executed\":11,\"unresolved\":0,\"failed\":0} at http://127.0.0.1:53468/spa",
+  "warm live run 2: answer \"FAILED MISSING link \\\"Continue to checkout form\\\"\" step 11: MISSING link \"Continue to checkout form\"",
+  "warm replay run 2: {\"actions\":12,\"executed\":11,\"unresolved\":0,\"failed\":0} at http://127.0.0.1:53468/spa"
+ ]
+}

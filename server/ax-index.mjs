@@ -32,7 +32,6 @@ const LANDMARK = new Set([
 
 const HEADING = new Set(['heading']);
 const MAX_ELEMENTS = 400;
-const BOX_BATCH = 24;
 
 const value = (property) => (property && property.value !== undefined ? property.value : '');
 
@@ -58,19 +57,19 @@ export async function axIndex(page, { limit = MAX_ELEMENTS } = {}) {
     for (const child of entry.childFrames || []) walkFrames(child);
   })(frameTree.frameTree);
 
+  // Frames are asked together; each answer is independent of the others.
+  const trees = await Promise.all(frameIds.map((frameId) =>
+    page.call('Accessibility.getFullAXTree', { frameId }).catch(() => null)));   // null: a frame that went away mid-walk
   const nodes = [];
-  for (const frameId of frameIds) {
-    try {
-      const tree = await page.call('Accessibility.getFullAXTree', { frameId });
-      for (const node of tree.nodes || []) {
-        nodes.push(frameIds.length > 1
-          ? { ...node, nodeId: `${frameId}:${node.nodeId}`,
-              parentId: node.parentId ? `${frameId}:${node.parentId}` : undefined,
-              childIds: (node.childIds || []).map((c) => `${frameId}:${c}`),
-              frameId }
-          : node);
-      }
-    } catch { /* a frame that went away mid-walk */ }
+  for (const [i, frameId] of frameIds.entries()) {
+    for (const node of (trees[i] && trees[i].nodes) || []) {
+      nodes.push(frameIds.length > 1
+        ? { ...node, nodeId: `${frameId}:${node.nodeId}`,
+            parentId: node.parentId ? `${frameId}:${node.parentId}` : undefined,
+            childIds: (node.childIds || []).map((c) => `${frameId}:${c}`),
+            frameId }
+        : node);
+    }
   }
 
   const viewport = {
@@ -117,18 +116,14 @@ export async function axIndex(page, { limit = MAX_ELEMENTS } = {}) {
     return true;
   });
 
-  // Geometry comes from the box model, in batches: hundreds of sequential CDP calls would dominate.
+  // Geometry comes from the box model, every node asked at once. CDP answers a session's commands in
+  // order over one socket, so this is one wave of traffic; awaiting them in batches of 24 made a
+  // 300-control page wait out thirteen round trips for the same answers.
   const boxes = new Map();
-  for (let i = 0; i < considered.length; i += BOX_BATCH) {
-    const slice = considered.slice(i, i + BOX_BATCH);
-    const results = await Promise.all(slice.map(async (n) => {
-      try {
-        const { model } = await page.call('DOM.getBoxModel', { backendNodeId: n.backendDOMNodeId });
-        return [n.nodeId, model];
-      } catch { return [n.nodeId, null]; }   // detached or not rendered
-    }));
-    for (const [id, model] of results) if (model) boxes.set(id, model);
-  }
+  const models = await Promise.all(considered.map((n) =>
+    page.call('DOM.getBoxModel', { backendNodeId: n.backendDOMNodeId })
+      .then((out) => out.model, () => null)));          // null: detached or not rendered
+  for (const [i, model] of models.entries()) if (model) boxes.set(considered[i].nodeId, model);
 
   const raw = [];
   for (const node of considered) {

@@ -19,7 +19,9 @@
  */
 export function handleDialogs(cdp, page, { accept = false, promptText = '' } = {}) {
   const seen = [];
-  const off = cdp.on('Page.javascriptDialogOpening', async (params) => {
+  const off = cdp.on('Page.javascriptDialogOpening', async (params, sessionId) => {
+    // Another tab's dialog is not this session's to answer, or to read.
+    if (sessionId && page.sessionId && sessionId !== page.sessionId) return;
     seen.push({ type: params.type, message: params.message, at: new Date().toISOString() });
     try {
       await page.call('Page.handleJavaScriptDialog', { accept, promptText });
@@ -34,10 +36,13 @@ export function handleDialogs(cdp, page, { accept = false, promptText = '' } = {
  * Without this the run continues against the original page while the work happens somewhere the session
  * cannot see. Returns the adopted target, or null when nothing opened.
  */
-export function trackTabs(cdp) {
+export function trackTabs(cdp, isOurs = () => true) {
   const opened = [];
+  // `isOurs` says whether this session's page opened the tab. Without it every new tab in the browser
+  // counted: Chrome's own pages (a stray accelerator opened chrome://help and the run moved there), and,
+  // in a Chrome shared between runs, a tab that belonged to somebody else's session.
   const off = cdp.on('Target.targetCreated', (params) => {
-    if (params.targetInfo.type === 'page') opened.push(params.targetInfo);
+    if (params.targetInfo.type === 'page' && isOurs(params.targetInfo)) opened.push(params.targetInfo);
   });
   // Without discovery turned on, Target.targetCreated never fires and a tab opens unnoticed. It is
   // browser-scoped, so it is sent with no sessionId.
@@ -200,9 +205,14 @@ async function dispatch(page, params) {
 export async function trustedType(page, backendNodeId, text) {
   await page.call('DOM.scrollIntoViewIfNeeded', { backendNodeId }).catch(() => null);
   await page.call('DOM.focus', { backendNodeId });
+  // Sent as one stream and awaited together. CDP delivers a session's commands in order, so the page
+  // sees the same keystrokes in the same sequence; awaiting each one separately cost two round trips per
+  // character. `key` is set because a handler that reads event.key otherwise gets an empty string.
+  const sent = [];
   for (const ch of text) {
-    await page.call('Input.dispatchKeyEvent', { type: 'keyDown', text: ch, unmodifiedText: ch });
-    await page.call('Input.dispatchKeyEvent', { type: 'keyUp', text: ch, unmodifiedText: ch });
+    sent.push(page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: ch, text: ch, unmodifiedText: ch }));
+    sent.push(page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: ch, text: ch, unmodifiedText: ch }));
   }
+  await Promise.all(sent);
   return text;
 }

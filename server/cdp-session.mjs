@@ -15,8 +15,9 @@ import { createRepair } from '../src/resolve/repair.js';
 import { serialize } from '../src/index/serialize.js';
 import { axIndex } from './ax-index.mjs';
 import { sameName } from '../src/index/samename.js';
+import { launder } from '../src/index/hostile.js';
 import { revealAllCdp } from './reveal.mjs';
-import { blockPrivateAddresses, connect, launch, open } from './cdp.mjs';
+import { attachTarget, connect, launch, open } from './cdp.mjs';
 import { captureState, handleDialogs, handleDownloads, restoreState, trackTabs,
          trustedClick, trustedType, uploadTo } from './cdp-hardening.mjs';
 
@@ -64,7 +65,7 @@ function createCdpOps(page) {
  *
  * It is async, unlike the DOM gate, because the answer lives in the browser.
  */
-function createCdpGate(page) {
+export function createCdpGate(page) {
   return async function gate(entry) {
     if (!entry.backendDOMNodeId) return { ok: false, reason: 'target has no node id' };
     let partial;
@@ -80,7 +81,10 @@ function createCdpGate(page) {
     if (node.ignored) return { ok: false, reason: 'target is no longer visible' };
 
     const role = String(node.role && node.role.value || '').toLowerCase();
-    const name = String(node.name && node.name.value || '').trim();
+    // Laundered exactly as the index launders it. The index cuts a name at 120 characters, and comparing
+    // that against the full live name refused every element with a long name as "renamed" - which on a
+    // shop is every product link.
+    const name = launder(String(node.name && node.name.value || ''));
     if (role !== entry.role) return { ok: false, reason: 'target role changed' };
     if (!sameName(entry.name, name)) return { ok: false, reason: 'target name changed' };
 
@@ -127,10 +131,12 @@ export async function openCdpSession(url, { store = memoryStore(), resolver = nu
   const live = {
     call: (method, params) => page.call(method, params),
     evaluate: (expression) => page.evaluate(expression),
+    get sessionId() { return page.sessionId; },
   };
 
   const dialogs = handleDialogs(client, live, { accept: acceptDialogs });
-  const tabs = trackTabs(client);
+  // Only a tab this session's own page opened is this session's to follow.
+  const tabs = trackTabs(client, (info) => info.openerId === page.targetId);
   await tabs.ready;
   const downloads = downloadTo ? handleDownloads(client, live, downloadTo) : null;
   if (downloads) await downloads.armed;
@@ -196,21 +202,13 @@ export async function openCdpSession(url, { store = memoryStore(), resolver = nu
 
     /** Follow a click that opened a tab. Without this the run continues against the wrong page. */
     async followNewTab() {
-      const adopted = await tabs.adopt(async (targetId) => {
-        const { sessionId } = await client.send('Target.attachToTarget', { targetId, flatten: true });
-        const call = (method, params) => client.send(method, params, sessionId);
-        await call('Page.enable'); await call('Runtime.enable');
-        await call('DOM.enable'); await call('Accessibility.enable');
-        await call('Network.enable'); await blockPrivateAddresses(call, client, sessionId);
-        return { sessionId, call,
-          evaluate: async (expression) => {
-            const out = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-            return out.result.value;
-          },
-          close: () => client.send('Target.closeTarget', { targetId }) };
-      });
+      const adopted = await tabs.adopt((targetId) => attachTarget(client, targetId));
       if (!adopted) return null;
+      // The tab left behind is closed: nothing reads it again, and in a long run they pile up.
+      const previous = page;
       page = adopted;
+      previous.close().catch(() => {});
+      await client.send('Target.activateTarget', { targetId: page.targetId }).catch(() => null);
       tabs.clear();
       stale = true;
       await refresh();
@@ -224,6 +222,10 @@ export async function openCdpSession(url, { store = memoryStore(), resolver = nu
     chrome: browser,
     cdp: client,
     evaluate: (expression) => page.evaluate(expression),
+    /** Start watching the page before an action; `.settled()` on the result waits for its effects. */
+    watch: () => page.watch(),
+    /** Wait for the page to stop moving, with no action of ours to anchor on. */
+    settled: (options) => page.settled(options),
     // The live page handle, for the authoring-time tools (vision) that need CDP directly. Named `raw`
     // so nothing in the hot path reaches for it by accident.
     get rawPage() { return page; },
@@ -231,7 +233,8 @@ export async function openCdpSession(url, { store = memoryStore(), resolver = nu
     captureState: () => captureState(page, new URL(url).origin),
     async goTo(next) {
       await page.close();
-      page = await open(client, next);
+      // In the same browser context: a session isolated from its neighbours stays isolated when it moves.
+      page = await open(client, next, { browserContextId: context });
       stale = true;
       await refresh();
     },

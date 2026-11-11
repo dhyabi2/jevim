@@ -8,7 +8,8 @@
     "build": "node tools/build.mjs",
     "test": "node --test \"test/**/*.test.js\"",
     "check": "npm run build && npm test",
-    "serve": "node server/serve.mjs"
+    "serve": "node server/serve.mjs",
+    "perf": "node bench/perf.mjs"
   },
   "license": "MIT",
   "dependencies": {

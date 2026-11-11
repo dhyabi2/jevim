@@ -7,9 +7,9 @@
 
 import { format } from '../src/artifact.js';
 import { looping, parseReply, prompt, summarise } from '../src/agent/policy.js';
+import { SETTLE_NAV } from './cdp.mjs';
 import { openCdpSession } from './cdp-session.mjs';
 
-const SETTLE_CEILING_MS = 8000;
 const READ_CHUNK = 6000;
 
 /** Visible text in the viewport, top to bottom, without scripts, styles or hidden nodes. */
@@ -47,22 +47,8 @@ const VISIBLE_TEXT = `(() => {
   return out.join(' | ').replace(/ {2,}/g, ' ');
 })()`;
 
-/** A readyState-and-quiet wait that survives the execution context being replaced mid-navigation. */
-async function settle(session, { minMs = 400 } = {}) {
-  const started = Date.now();
-  await new Promise((r) => setTimeout(r, minMs));
-  let lastLen = -1;
-  let stable = 0;
-  while (Date.now() - started < SETTLE_CEILING_MS) {
-    try {
-      const state = await session.evaluate('[document.readyState, document.body ? document.body.innerHTML.length : 0]');
-      if (state && state[0] === 'complete' && state[1] === lastLen) { if (++stable >= 2) return; }
-      else stable = 0;
-      lastLen = state ? state[1] : -1;
-    } catch { stable = 0; }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-}
+// Waiting is the session's job now (see `settled` in cdp.mjs): each action arms a watcher first and then
+// waits for what the action actually did, instead of sleeping a fixed time and polling.
 
 async function onNode(page, backendNodeId, fn, args = []) {
   const { object } = await page.call('DOM.resolveNode', { backendNodeId });
@@ -73,13 +59,21 @@ async function onNode(page, backendNodeId, fn, args = []) {
   return out.result ? out.result.value : undefined;
 }
 
+/** Every visible http(s) link on the page with enough text to be a title, in document order. */
+const PAGE_LINKS = `[...document.querySelectorAll('a[href]')].map((a) => ({ text: (a.innerText || a.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().slice(0, 140), href: a.href }))
+  .filter((l) => l.text.length >= 12 && /^https?:/.test(l.href)).slice(0, 1500)`;
+const norm = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
 const KEY_CODES = { Enter: 13, Escape: 27, Tab: 9, Space: 32, PageUp: 33, PageDown: 34, End: 35, Home: 36,
                     ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
 
 /** One real key press, the way a keyboard sends it. */
 async function pressKey(page, name) {
   const code = KEY_CODES[name];
-  const key = { key: name === 'Space' ? ' ' : name, code: name, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code };
+  // No nativeVirtualKeyCode. It is the platform's own key number, and the Windows code passed there means
+  // a different key on macOS: Chrome took Enter for a browser shortcut and opened chrome://help, which
+  // the run then followed as if the page had opened a tab.
+  const key = { key: name === 'Space' ? ' ' : name, code: name, windowsVirtualKeyCode: code };
   await page.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key });
   if (name === 'Enter') await page.call('Input.dispatchKeyEvent', { type: 'char', text: '\r', ...key });
   if (name === 'Space') await page.call('Input.dispatchKeyEvent', { type: 'char', text: ' ', ...key });
@@ -92,6 +86,8 @@ const pressEnter = (page) => pressKey(page, 'Enter');
 // command wait out its own 30-second timeout, and rebuilding the index issues hundreds of them; without
 // a bound, one step on such a page ran past the whole run's ceiling and the run ended with no answer.
 const ACTION_MS = 60000;
+// How long a replay waits for the next recorded element to appear before scrolling to look for it.
+const TARGET_WAIT_MS = 2500;
 
 /** `promise`, or `fallback` once `ms` has passed - whichever comes first. The loser is abandoned. */
 function within(promise, ms, fallback) {
@@ -130,12 +126,14 @@ export async function runAgent({ task, website, chat, maxSteps = 25, headless = 
   // With a live viewer, open on a blank page, let the viewer attach, and only then load the site - so the
   // page is seen loading from its first paint instead of appearing only once it has settled.
   const session = await openCdpSession(onSession ? 'about:blank' : website, { headless, ...(browser || {}) });
+  // Opening a session already waits for the page and indexes it, so only the live-viewer path - which
+  // opened a blank page first - has anything left to wait for.
   if (onSession) {
     await onSession(session);
     await session.rawPage.call('Page.navigate', { url: website }).catch(() => null);
+    await within(session.settled({ ...SETTLE_NAV, ceilingMs: 15000 }), 20000, null);
+    await within(session.refresh().catch(() => null), ACTION_MS, null);
   }
-  await within(settle(session), 20000, null);
-  await within(session.refresh().catch(() => null), ACTION_MS, null);
 
   const history = [];
   const recorded = [];
@@ -153,6 +151,7 @@ export async function runAgent({ task, website, chat, maxSteps = 25, headless = 
   let answer = null;
   let finalUrl = '';
   let outOfTime = false;
+  let links = [];
 
   // With vision on, each step also carries a small JPEG of the viewport. The index stays the only thing
   // an action can target; the picture is context, for charts, layouts and widgets the AX tree flattens.
@@ -199,7 +198,15 @@ export async function runAgent({ task, website, chat, maxSteps = 25, headless = 
         // A replay makes no model calls; thinkMs stands in for them when measuring what a live run costs.
         if (thinkMs) { await throttle(20); await new Promise((r) => setTimeout(r, thinkMs)); await throttle(1); }
         if (entry.fp) {
+          // The recording says which element comes next, so wait for THAT rather than for a guess at
+          // quiet: a control the page is still rendering is looked for again before the page is
+          // scrolled in search of it, and one already there costs no wait at all.
           let found = session.index.find((e) => e.fp === entry.fp);
+          for (const until = Date.now() + TARGET_WAIT_MS; !found && Date.now() < until;) {
+            await new Promise((r) => setTimeout(r, 100));
+            await within(session.refresh().catch(() => null), 10000, null);
+            found = session.index.find((e) => e.fp === entry.fp);
+          }
           if (!found) { await session.reveal({ maxSteps: 6 }).catch(() => null); found = session.index.find((e) => e.fp === entry.fp); }
           if (!found) { replayStats.unresolved += 1; history.push({ summary: `${entry.action} ${entry.role} "${entry.name}"`, outcome: 'unresolved', url: '' }); continue; }
           action.entry = found;
@@ -317,6 +324,7 @@ export async function runAgent({ task, website, chat, maxSteps = 25, headless = 
     artifact: format({ meta: { name: task, url: website }, steps: recorded }),
     pinnedSteps: recorded.filter((s) => s.fp).length,
     log,
+    links,
     finalUrl,
     ...(replayStats ? { replay: replayStats } : {}),
   };
@@ -327,6 +335,10 @@ export async function runAgent({ task, website, chat, maxSteps = 25, headless = 
     switch (action.action) {
       case 'done':
         answer = action.answer;
+        // The model sees link names, never their addresses, so an answer that names what it found could
+        // not say where it was. The addresses of the links it named are added here, by code.
+        links = await within(linksNamedIn(answer), 5000, []);
+        if (links.length && !replay) answer += `\n\nLinks:\n${links.map((l) => `- ${l.text}: ${l.href}`).join('\n')}`;
         return 'finished';
 
       case 'click':
@@ -338,6 +350,7 @@ export async function runAgent({ task, website, chat, maxSteps = 25, headless = 
         // The runner, not a raw click: the gate re-reads the element from Chrome immediately before
         // acting, and refuses if it is gone or has become something else since it was shown.
         const operator = action.action === 'click' ? 'goto' : action.action === 'type' ? 'change' : 'select';
+        const watch = await session.watch();
         const ran = await session.runner.run({ count: 1, operator, target }, { confirmed: true });
         if (ran.status !== 'done') return `not done: ${ran.status}${ran.reason ? ` (${ran.reason})` : ''}`;
 
@@ -365,7 +378,7 @@ export async function runAgent({ task, website, chat, maxSteps = 25, headless = 
         recorded.push({ verb: action.action === 'click' ? 'goto' : action.action, target, fp: entry.fp,
                         role: entry.role, name: entry.name,
                         ...(action.action === 'type' ? { value: action.text } : {}) });
-        await settle(session);
+        await watch.settled();
         await adoptNewTab();
         await session.refresh();
         return result;
@@ -380,30 +393,34 @@ export async function runAgent({ task, website, chat, maxSteps = 25, headless = 
           if (ran.status !== 'done') return `not done: ${ran.status}${ran.reason ? ` (${ran.reason})` : ''}`;
           await page.call('DOM.focus', { backendNodeId: action.entry.backendDOMNodeId }).catch(() => null);
         }
+        const watch = await session.watch();
         await pressKey(page, action.key);
-        await settle(session, { minMs: 250 });
+        await watch.settled();
         await session.refresh();
         return 'ok';
       }
 
       case 'scroll': {
+        const watch = await session.watch();
         await session.evaluate(`window.scrollBy(0, ${action.direction === 'up' ? '-' : ''}Math.round(innerHeight * 0.8))`);
-        await new Promise((r) => setTimeout(r, 400));
+        // A scroll changes nothing by itself; what it may start is a lazy load, which shows as a request.
+        await watch.settled({ idleMs: 200 });
         await session.refresh();
         return 'scrolled';
       }
 
       case 'goto': {
         await page.call('Page.navigate', { url: action.url });
-        await settle(session, { minMs: 800 });
+        await session.settled(SETTLE_NAV);
         await session.refresh();
         readOffset = 0;
         return 'navigated';
       }
 
       case 'back': {
+        const watch = await session.watch();
         await session.evaluate('history.back()').catch(() => null);
-        await settle(session, { minMs: 800 });
+        await watch.settled();
         await session.refresh();
         return 'went back';
       }
@@ -434,10 +451,26 @@ export async function runAgent({ task, website, chat, maxSteps = 25, headless = 
     }
   }
 
+  /** Links on the current page whose text the answer names, by the first words of that text. */
+  async function linksNamedIn(text) {
+    const all = await session.evaluate(PAGE_LINKS).catch(() => []);
+    const said = norm(text);
+    const out = [];
+    const seen = new Set();
+    for (const link of all || []) {
+      const lead = norm(link.text).split(' ').slice(0, 3).join(' ');
+      if (lead.length < 12 || !said.includes(lead) || seen.has(link.href)) continue;
+      seen.add(link.href);
+      out.push(link);
+      if (out.length >= 20) break;
+    }
+    return out;
+  }
+
   // A click that opened a tab moves the task there; followNewTab clears the list once adopted.
   async function adoptNewTab() {
     if (!session.events.tabsOpened.length) return;
     const followed = await session.followNewTab().catch(() => null);
-    if (followed) await settle(session);
+    if (followed) await session.settled(SETTLE_NAV);
   }
 }
