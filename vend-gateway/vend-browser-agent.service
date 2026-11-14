@@ -1,15 +1,25 @@
 [Unit]
-Description=Vend gateway for the Jevim browser agent (private; beside vend-api)
+Description=Vend gateway for the Jevim browser agent (x402 in XNO; beside vend-api)
 After=network-online.target vend-api.service
 
 [Service]
-WorkingDirectory=/root/vend-private
-EnvironmentFile=/root/.hermes/.env
-EnvironmentFile=/root/vend/deploy/vend.env
-EnvironmentFile=/root/vend-private/browser-agent.env
-ExecStart=/root/vend/.venv/bin/python /root/vend-private/browser_agent.py
+User=vend
+Group=vend
+WorkingDirectory=/srv/vend/app
+EnvironmentFile=/etc/vend.env
+EnvironmentFile=/etc/vend-browser-agent.env
+Environment=VEND_DIR=/srv/vend/app
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/srv/vend/app/.venv/bin/python /opt/jevim/vend-gateway/browser_agent.py
 Restart=always
 RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/srv/vend
+MemoryHigh=300M
+MemoryMax=450M
 
 [Install]
 WantedBy=multi-user.target

@@ -15,8 +15,8 @@ calls and MCP clients time out at 60 s:
 
 Job ids are random UUIDs, so only the payer can find their job.
 
-Every input check runs BEFORE the payment is redeemed (Vend's ``validate_input`` hook): a buyer who sends
-a bad task or a private address keeps their block and can retry with it.
+Every input check runs BEFORE Vend's payment gate: a buyer who sends a bad task or a private address keeps
+their block and can retry with it. A run is never free: Vend's daily free calls do not cover this endpoint.
 """
 
 import ipaddress
@@ -58,8 +58,23 @@ app = FastAPI(title="Vend browser agent", docs_url=None, redoc_url=None, openapi
 store.init()
 
 
+class _NoTrial:
+    """A browser run spends model tokens, so it is never free: Vend's daily free calls do not cover it."""
+    max_free = 0
+
+    def remaining(self, key):
+        return 0
+
+    def consume(self, key):
+        return False
+
+
+# Vend's gate asks this module-level name for the tracker; in this process it always answers "none left".
+vend.get_tracker = lambda: _NoTrial()
+
+
 def _bad(message: str) -> JSONResponse:
-    return JSONResponse(status_code=400, content={"error": "bad_input", "message": message})
+    return JSONResponse(status_code=400, content={"error": "bad_input", "message": message, "payment_taken": False})
 
 
 def public_website(raw: str):
@@ -101,16 +116,18 @@ async def start_run(
 ):
     """Start a browser-agent run: a real browser that searches, clicks, filters and reads, then answers.
     Paid per run in XNO. Returns a job id at once; follow it at the links returned."""
+    # Inputs are checked before Vend's gate sees the request, so nothing the buyer owns (a block, a prepaid
+    # balance, a signed send) is consumed for a run that cannot start. A bare probe with no parameters and
+    # no payment still falls through to the 402 challenge, which is what x402 discovery needs.
+    if request.query_params:
+        problem = input_problem(request)
+        if problem is not None:
+            return problem
     paid, response = await vend.require_payment(
-        PATH, price_xno=PRICE_XNO, price_raw=PRICE_RAW, validate_input=input_problem,
+        PATH, price_xno=PRICE_XNO, price_raw=PRICE_RAW, required=("task", "website"),
     )(request)
     if not paid:
         return response
-    # Vend's free-trial branch approves a call before validate_input runs (a paid block is checked
-    # before it is redeemed), so the same check runs here, and a trial call with bad input gets the same 400.
-    problem = input_problem(request)
-    if problem is not None:
-        return problem
 
     url, _ = public_website(website.strip())
     try:
