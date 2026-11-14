@@ -21,3 +21,11 @@ Endpoints: `GET /api/v1/browser-agent?task=&website=` (paid, returns a job id), 
 `GET .../jobs/{id}/events` (free, server-sent events). Inputs are checked before vend's payment gate sees the
 request, so a bad task or a private address costs nothing. A run is never free: vend's daily free calls do not
 cover this endpoint, because every run spends model tokens.
+
+A payment is not lost to a failure on our side. The server holds no key and cannot send money back, so the remedy
+is another run: `retry_of=<job_id>` starts a new run with no new payment when the paid run failed, could not start,
+or was lost to an agent restart. One payment buys at most three runs, a job is retried once, and a run that
+finished (`done`) or used its budget (`stopped`) is not retried. If the agent is down, the call answers 503 before
+anything is taken. `browser-agent-jobs.sqlite3` beside vend's database records which payment bought which job.
+
+Laws: `test_gateway.py` (10; run command in its header).
